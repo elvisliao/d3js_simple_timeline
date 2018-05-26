@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<!--
+Mycam SLS Timeline Test
+┌- - - - - - - - - - - - - -┐
+│        2015-01-25         │
+└- - - - - - - - - - - - - -┘
+* 優化Function
+* 封裝程式碼
+* 修改使用者行為Button
++ 新增選範圍Button
+-->
+<html>
+
+<head>
+    <meta name="robots" content="noindex">
+    <meta charset="utf-8">
+</head>
+<link rel="stylesheet" type="text/css" href="css/r1dc0s91.css">
+
+<body>
+    <div width="100%" class="timeline" id="timeline">
+        <div class="zoom" style="position: relative">
+            <button class="min" id="min" onclick="MinRange()">5 Minute</button>
+            <button class="hour" id="hour" onclick="HourRange()">1 Hour</button>
+            <button class="day" id="day" onclick="DayRange()">24 Hour</button>
+        </div>
+        <br>
+    </div>
+    <div class="videobar" style="position: relative">
+
+        <div class="bottom-center-cluster">
+            <button class="timestamp">
+                <span class="date"></span>
+                <span class="time"></span>
+            </button>
+            <span>&nbsp;&nbsp;</span>
+            <button class="live live" id="live">Live</button>
+            <button class="live go-live" id="playback" onclick="golive()">Go Live</button>
+        </div>
+    </div>
+    <script type="text/javascript" src="lib/d3.v3.min.js"></script>
+</body>
+<script>
+//Timebar.context
+var margin = {
+        top: 60,
+        right: 30,
+        bottom: 10,
+        left: 30
+    },
+    livex = 0,
+    transx = 0,
+    transy = 0,
+    st = Date.now(),
+    selectTime = Date.now(),
+    selectTimex = 0,
+    stx = 0,
+    livetimer = null,
+    playtimer = null,
+    turn = false,
+    dragInitiated = false,
+    width = 960 - margin.left - margin.right,
+    height = 100 - margin.top - margin.bottom,
+    Minstep = 60e3,
+    Hourstep = 600e3,
+    Daystep = 14400e3,
+    minnext,
+    minpre,
+    minpree,
+    timeFormat = d3.time.format('%H:%M:%S'),
+    now = Date.now(),
+    view,
+    x,
+    y,
+    xAxis,
+    yAxis,
+    xAxisBar,
+    zoom,
+    userbtn;
+
+function CountTick(step) {
+    var before = Date.now() - (step * 4.5);
+    var after = Date.now() + (step * 1.5);
+    minpre = ((Math.round(before / step)) * step);
+    minpree = ((Math.round(before / step)) * step);
+    minnext = ((Math.round(after / step)) * step);
+}
+
+function ScaleRange(mode) {
+
+    switch (mode) {
+        case "min":
+            CountTick(Minstep);
+            break;
+
+        case "hour":
+            CountTick(Hourstep);
+            break;
+
+        case "day":
+            var before = Date.now() - (Daystep * 3);
+            var after = Date.now() + (Daystep * 3);
+            minpre = ((Math.floor(before / Daystep)) * Daystep);
+            minpree = ((Math.floor(before / Daystep)) * Daystep);
+            minnext = ((Math.floor(after / Daystep)) * Daystep);
+            break;
+    }
+}
+
+function AxisRange(mode) {
+    x = d3.time.scale()
+        .domain([minpre, minnext])
+        .rangeRound([0, width])
+        .nice();
+    y = d3.scale.linear()
+        .domain([0, 4])
+        .range([height, 0])
+        .nice();
+
+    switch (mode) {
+        case "min":
+            xAxis = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat(d3.time.format('%H:%M %p'))
+                .ticks(d3.time.minutes, 1)
+                .tickSize(15);
+            xAxisBar = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat("")
+                .ticks(d3.time.second, 6)
+                .tickSize(8);
+            view = 1;
+            break;
+
+        case "hour":
+            xAxis = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat(d3.time.format('%H:%M %p'))
+                .ticks(d3.time.minutes, 10)
+                .tickSize(15);
+            xAxisBar = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat("")
+                .ticks(d3.time.minutes, 1)
+                .tickSize(8);
+            view = 2;
+            break;
+
+        case "day":
+            xAxis = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat(d3.time.format('%H:%M %p'))
+                .ticks(d3.time.hours, 4)
+                .tickSize(15);
+            xAxisBar = d3.svg.axis()
+                .scale(x)
+                .orient("bottom")
+                .tickFormat("")
+                .ticks(d3.time.minutes, 24)
+                .tickSize(8);
+            view = 3;
+            break;
+    }
+
+    yAxis = d3.svg.axis()
+        .scale(y)
+        .orient('left')
+        .ticks(10);
+
+}
+
+function ChoseDisplay(mode) {
+    ScaleRange(mode);
+    AxisRange(mode);
+    zoom = d3.behavior.zoom()
+        .x(x)
+        .scaleExtent([1, 1])
+        .on("zoom", zoomed);
+}
+
+ChoseDisplay("hour"); //[min,hour,day]
+
+// create zoom
+zoom = d3.behavior.zoom()
+    .x(x)
+    .scaleExtent([1, 1])
+    .on("zoom", zoomed);
+
+// Add an SVG element with the desired dimensions and margin.
+var svg = d3.select("#timeline").append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+    .append("svg:g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+    .call(zoom)
+    .on("mousedown.zoom", null); //disable drag
+
+var rewindbtn = d3.select("#rewind-30").append("svg")
+    .attr("width", 40)
+    .attr("height", 45)
+    .append("svg:g")
+    .attr("transform", "translate(0,150)");
+
+var pausebtn = d3.select("#pause").append("svg")
+    .attr("width", 45)
+    .attr("height", 45)
+    .append("svg:g")
+    .attr("transform", "translate(0,150)");
+
+var stopbtn = d3.select("#stop").append("svg")
+    .attr("width", 45)
+    .attr("height", 45)
+    .append("svg:g")
+    .attr("transform", "translate(0,150)");
+
+
+// SVG add the X-axis.
+svg.append("g")
+    .attr("class", "x axis")
+    .call(xAxis)
+    .selectAll("text")
+    .style("text-anchor", "middle");
+
+
+// SVG add the Y-axis.
+svg.append("g")
+    .attr("class", "y axis")
+    .attr("transform", "translate(0," + -height + ")")
+    .call(yAxis);
+
+// SVG add the Ticks.
+svg.append("g")
+    .attr("class", "x grid")
+    .call(xAxisBar);
+//SVG add Playbar
+
+svg.append("g")
+    .attr("class", "timeline")
+    .append("path")
+    .attr("id", "timebar")
+    .attr("d", 'M 0 -5.4' + 'L ' + x(selectTime) + ' -5.4')
+    .attr("stroke", "#81D5EE")
+    .attr('stroke-width', 9)
+    .attr('opacity', 0.6);
+
+pausebtn.append("g")
+    .attr("class", "pause userbtn")
+    .attr("id", "pausebtn")
+    .append("path")
+    .attr("d", "m16,-147c-7.86503,0 -14.264,6.39897 -14.264,14.26402c0,7.86501 6.39897,14.26398 14.264,14.26398c7.86504,0 14.264,-6.39709 14.264,-14.26398c-0.00184,-7.86505 -6.39896,-14.26402 -14.264,-14.26402zm0,24.85176c-5.8478,0 -10.58961,-4.74179 -10.58961,-10.58774c0,-5.84967 4.74181,-10.58963 10.58961,-10.58963c5.84965,0 10.58961,4.73996 10.58961,10.58963c-0.00184,5.84595 -4.74181,10.58774 -10.58961,10.58774zm0.90023,-2.40486l4.00508,0l0,-16.25922l-4.00508,0l0,16.25922zm-5.8386,0l4.00507,0l0,-16.25922l-4.00507,0l0,16.25922z")
+    .attr("fill", "#65656a")
+    .on("click", function() {
+        HiddenBtn("live", "h");
+        HiddenBtn("playback", "d");
+        if (turn == false) {
+            d3.select(this)
+
+            .attr("fill", "#65656a")
+                .attr("d", "m502,-139.6l-6.737,-3.88937l0,15.55923l6.737,-3.88934l6.737,-3.89117l-6.737,-3.88934zm-2.25056,-10.48859c-7.86505,0 -14.26401,6.39896 -14.26401,14.26402c0,7.86501 6.39896,14.26398 14.26401,14.26398c7.86504,0 14.26399,-6.39711 14.26399,-14.26398c-0.00183,-7.86507 -6.39896,-14.26402 -14.26399,-14.26402zm0,24.85179c-5.84782,0 -10.58963,-4.74182 -10.58963,-10.58777c0,-5.84962 4.74183,-10.58963 10.58963,-10.58963c5.84962,0 10.58959,4.74001 10.58959,10.58963c-0.0018,5.84595 -4.74178,10.58777 -10.58959,10.58777z");
+            turn = true;
+            clearInterval(playtimer);
+            clearInterval(livetimer);
+        } else if (turn == true) {
+            d3.select(this)
+                .attr("fill", "#65656a")
+                .attr("d", "m500,-150c-7.86503,0 -14.264,6.39897 -14.264,14.26402c0,7.86501 6.39897,14.26398 14.264,14.26398c7.86504,0 14.264,-6.39709 14.264,-14.26398c-0.00184,-7.86505 -6.39896,-14.26402 -14.264,-14.26402zm0,24.85176c-5.8478,0 -10.58961,-4.74179 -10.58961,-10.58774c0,-5.84967 4.74181,-10.58963 10.58961,-10.58963c5.84965,0 10.58961,4.73996 10.58961,10.58963c-0.00184,5.84595 -4.74181,10.58774 -10.58961,10.58774zm0.90023,-2.40486l4.00508,0l0,-16.25922l-4.00508,0l0,16.25922zm-5.8386,0l4.00507,0l0,-16.25922l-4.00507,0l0,16.25922z");
+            turn = false;
+            golive();
+        }
+
+    })
+
+.on("mouseover", function() {
+        d3.select(this)
+            .transition()
+            .duration(100)
+            .attr("fill", "#00A8F0");
+
+    })
+    .on("mouseout", function() {
+        d3.select(this)
+            .transition()
+            .duration(100)
+            .attr("fill", "#65656a");
+    });
+
+livetimer = setInterval(function() {
+    live()
+}, 1000);
+
+rewindbtn.append("g")
+    .attr("class", "back30 userbtn")
+    .attr("id", "back30")
+    .append("path")
+    .attr("d", "m10,-130c0.21133,-0.22758 0.31625,-0.52312 0.31625,-0.88664c0,-0.26601 -0.05616,-0.4729 -0.16846,-0.62361c-0.11084,-0.15076 -0.25861,-0.25861 -0.43889,-0.32954c-0.18029,-0.07242 -0.38127,-0.11528 -0.60441,-0.13303c0,0 -0.67386,-0.01624 -0.67386,-0.01624c0,0 -0.47289,0 -0.47289,0c0,0 0,-1.75409 0,-1.75409c0,0 0.66203,0 0.66203,0c0,0 0.55122,-0.03845 0.55122,-0.03845c0.1788,-0.02658 0.34283,-0.07831 0.49061,-0.15515c0.14926,-0.07536 0.26748,-0.18323 0.35613,-0.32216c0.09163,-0.14185 0.13596,-0.32213 0.13596,-0.54825c0,-0.28668 -0.11379,-0.52164 -0.34283,-0.70932c-0.22758,-0.19209 -0.50984,-0.28519 -0.84381,-0.28519c-0.31329,0 -0.57188,0.08569 -0.77877,0.25417c-0.20689,0.17142 -0.33989,0.38423 -0.40639,0.63396c0,0 -2.22255,-0.4581 -2.22255,-0.4581c0.10641,-0.41081 0.27043,-0.76698 0.48324,-1.05807c0.21279,-0.29111 0.47288,-0.52905 0.76991,-0.70786c0.29556,-0.17879 0.62657,-0.31181 0.9901,-0.39899c0.36501,-0.08572 0.74775,-0.12857 1.15266,-0.12857c0.42265,0 0.8305,0.05173 1.22063,0.15517c0.38865,0.10492 0.73149,0.26601 1.03001,0.4847c0.29554,0.21724 0.5305,0.49507 0.70636,0.83051c0.1788,0.33101 0.26156,0.72707 0.26156,1.18517c0,0.52904 -0.13892,0.98271 -0.41673,1.36397c-0.27635,0.37535 -0.67977,0.6192 -1.21029,0.72409c0,0 0,0.03992 0,0.03992c0.28669,0.03842 0.54086,0.12413 0.76252,0.25713c0.22021,0.13448 0.40639,0.29999 0.5586,0.50096c0.15369,0.19653 0.27042,0.42116 0.35022,0.6709c0.0798,0.25121 0.12118,0.51868 0.12118,0.79504c0,0.47583 -0.09161,0.89403 -0.27485,1.25163c-0.18768,0.36502 -0.43594,0.66353 -0.74332,0.90146c-0.31181,0.23792 -0.67682,0.41524 -1.09206,0.53197c-0.4182,0.11528 -0.85858,0.17291 -1.33146,0.17291c-0.84823,0 -1.58563,-0.19803 -2.20038,-0.59109c-0.61623,-0.39606 -1.02261,-1.01965 -1.21768,-1.87381c0,0 2.12798,-0.50095 2.12798,-0.50095c0.07094,0.34283 0.21574,0.61327 0.44038,0.8098c0.21574,0.19949 0.54381,0.29703 0.97531,0.29703c0.44037,0.0015 0.76548,-0.1138 0.97679,-0.34135c0,0 0,0 0,0m4.17616,0.58521c-0.266,-0.47734 -0.44924,-1.00638 -0.54973,-1.58861c-0.10491,-0.58519 -0.15516,-1.15855 -0.15516,-1.72751c0,-0.56598 0.05025,-1.13934 0.15516,-1.72304c0.10049,-0.58669 0.28373,-1.1172 0.54973,-1.59157c0.26747,-0.47583 0.62657,-0.86301 1.08615,-1.16446c0.4581,-0.30148 1.04182,-0.45369 1.7541,-0.45369c0.70784,0 1.29303,0.15221 1.75114,0.45369c0.46106,0.30145 0.81868,0.68863 1.08616,1.16446c0.26452,0.47437 0.44776,1.00488 0.5512,1.59157c0.10345,0.58517 0.15516,1.15706 0.15516,1.72304c0,0.56895 -0.05171,1.14085 -0.15516,1.72751c-0.10344,0.58372 -0.28668,1.11127 -0.5512,1.58861c-0.26895,0.47731 -0.62658,0.86597 -1.08616,1.16592c-0.45811,0.30295 -1.04182,0.45073 -1.75114,0.45073c-0.71081,0 -1.29601,-0.14778 -1.7541,-0.45073c-0.45958,-0.29996 -0.81868,-0.68861 -1.08615,-1.16592c0,0 0,0 0,0m1.31668,-3.31612c0,0 0.03252,0.90146 0.03252,0.90146c0.02216,0.35022 0.08423,0.69011 0.18176,1.01372c0.10049,0.32068 0.24826,0.59554 0.45071,0.82312c0.20392,0.22314 0.48766,0.33693 0.85858,0.33693c0.35613,0 0.64134,-0.11232 0.84675,-0.33693c0.20689,-0.22609 0.35909,-0.50244 0.46106,-0.82312c0.09605,-0.32361 0.15517,-0.66203 0.18029,-1.01372c0,0 0.03399,-0.90146 0.03399,-0.90146c0,0 -0.03399,-0.90289 -0.03399,-0.90289c-0.02512,-0.34874 -0.08424,-0.68716 -0.18029,-1.01227c-0.10197,-0.32069 -0.25417,-0.59407 -0.46106,-0.82014c-0.20688,-0.22314 -0.49062,-0.33694 -0.84675,-0.33694c-0.37093,0 -0.65466,0.11232 -0.85858,0.33694c-0.20245,0.22461 -0.34875,0.49945 -0.45071,0.82014c-0.09753,0.3251 -0.1596,0.66203 -0.18176,1.01227c-0.02217,0.35172 -0.03252,0.6517 -0.03252,0.90289c0,0 0,0 0,0m-0.40491,-13.72096c0,0 0,-1.4482 0,-1.4482c0,-0.16255 -0.10344,-0.21428 -0.23052,-0.11086c0,0 -3.3087,2.63486 -3.3087,2.63486c-0.12708,0.10196 -0.12708,0.26747 0,0.36943c0,0 3.3087,2.63486 3.3087,2.63486c0.12708,0.10196 0.23052,0.05173 0.23052,-0.11086c0,0 0,-0.9886 0,-0.9886c5.34801,0.80241 9.30693,5.34357 9.30693,10.82751c0,6.04552 -4.91798,10.9635 -10.96349,10.9635c-6.0455,0 -10.96348,-4.91798 -10.96348,-10.9635c0,-0.81718 -0.66056,-1.47775 -1.47775,-1.47775c-0.81721,0 -1.47776,0.66057 -1.47776,1.47775c0,7.674 6.245,13.91902 13.91899,13.91902c7.674,0 13.91901,-6.24355 13.91901,-13.91902c0,-7.11391 -5.24752,-12.97914 -12.26244,-13.80815c0,0 0,0 0,0m-4.46134,4.08009c0.12708,0.10196 0.23054,0.05173 0.23054,-0.11086c0,0 0,-5.41743 0,-5.41743c0,-0.16255 -0.10345,-0.21428 -0.23054,-0.11086c0,0 -3.31017,2.63486 -3.31017,2.63486c-0.12709,0.10196 -0.12709,0.26747 0,0.36943c0,0 3.31017,2.63486 3.31017,2.63486c0,0 0,0 0,0")
+    .attr("fill", "#65656a")
+    .on("click", function() {
+        selectTime = selectTime - 30e3;
+
+    })
+    .on("mouseover", function() {
+        d3.select(this)
+            .transition()
+            .duration(100)
+            .attr("fill", "#00A8F0");
+
+    })
+    .on("mouseout", function() {
+        d3.select(this)
+            .transition()
+            .duration(100)
+            .attr("fill", "#65656a");
+    });
+
+stopbtn.append("g")
+    .attr("class", "back30 userbtn")
+    .attr("id", "back30")
+    .append("path")
+    .attr("d", "m14,-119c-7.73145,0 -14,-6.26855 -14,-14c0,-7.73232 6.26855,-14 14,-14s14,6.26768 14,14c0,7.73145 -6.26855,14 -14,14zm0,-24.5c-5.79857,0 -10.5,4.70143 -10.5,10.5s4.70143,10.5 10.5,10.5s10.5,-4.70143 10.5,-10.5s-4.70143,-10.5 -10.5,-10.5zm-3.5,7l7,0l0,7l-7,0l0,-7z")
+    .attr("fill", "#65656a")
+    .on("click", function() {
+        turn = true;
+        clearInterval(playtimer);
+        clearInterval(livetimer);
+
+    })
+    .on("mouseover", function() {
+        d3.select(this)
+            .transition()
+            .duration(100)
+            .attr("fill", "#00A8F0");
+
+    })
+    .on("mouseout", function() {
+        d3.select(this)
+            .transition()
+            .duration(100)
+            .attr("fill", "#65656a");
+    });
+
+
+
+function HiddenBtn(btnId, type) {
+    var currentBtn = document.getElementById(btnId);
+    if (type == "d") {
+        currentBtn.style.display = "block";
+    } else if (type == "h") {
+        currentBtn.style.display = "none";
+    }
+}
+
+function freshliveR() {
+    zoom.translate([transx - 450, transy]);
+    updateX(x);
+    transx = transx - 450;
+    switch (view) {
+        case 1:
+
+            minnext = (minnext + (Minstep * 3));
+            minpre = (minpre + (Minstep * 3));
+            break;
+        case 2:
+            minnext = (minnext + (Hourstep * 3));
+            minpre = (minpre + (Hourstep * 3));
+            break;
+        case 3:
+            minnext = (minnext + (Daystep * 3));
+            minpre = (minpre + (Daystep * 3));
+            break;
+    }
+}
+
+function freshliveL() {
+    zoom.translate([transx + 450, transy]);
+    updateX(x);
+    transx = transx + 450;
+    switch (view) {
+        case 1:
+
+            minnext = (minnext - (Minstep * 3));
+            minpre = (minpre - (Minstep * 3));
+            break;
+        case 2:
+            minnext = (minnext - (Hourstep * 3));
+            minpre = (minpre - (Hourstep * 3));
+            break;
+        case 3:
+            minnext = (minnext - (Daystep * 3));
+            minpre = (minpre - (Daystep * 3));
+            break;
+    }
+}
+
+function updateCL(slecttime) {
+
+    svg.selectAll('#chandle')
+        .attr("cx", x(selectTime));
+    svg.selectAll('#lhandle')
+        .attr("d", 'M' + x(selectTime) + ' 0 ' + 'V-60')
+        .attr("stroke", "red")
+        .attr('stroke-width', 2);
+}
+
+//Event.setting
+var num = 50,
+    dataset = [];
+for (var i = 0; i < num; i++) {
+    var tempnum = Date.now() - Math.floor(Math.random() * 60 * 60 * 1000);
+    dataset.push(tempnum);
+}
+
+function EventConf() {
+        svg.selectAll("rect")
+            .data(dataset)
+            .enter()
+            .append("rect")
+            .attr("class", "event rect")
+            .attr("x", function(d) {
+                return x(d);
+            })
+            .attr("y", 0 - margin.top)
+            .attr("width", 7)
+            .attr("height", 48)
+            .attr("fill", "#FFBB77")
+            .attr("opacity", 0.5)
+            .attr("cursor", "pointer")
+            .on("mouseover", function(d, i) {
+                d3.select(this)
+                    .transition()
+                    .ease('cubic-out')
+                    .duration(300)
+                    .attr("fill", "#FF0000")
+                    .attr("opacity", 0.7)
+                    .attr("height", 59);
+            })
+            .on("mouseout", function(d, i) {
+                d3.select(this)
+                    .transition()
+                    .ease('cubic-out')
+                    .duration(500)
+                    .attr("fill", "#FFBB77")
+
+                .attr("height", 48);
+            });
+    }
+    //時間Slide
+var brush = d3.svg.brush()
+    .x(x)
+    .on("brush", brushed);
+
+var slider = svg.append("g")
+    .attr("class", "slider")
+    .call(brush);
+
+
+slider.select(".background")
+    .attr("y", -80)
+    .attr("width", 900)
+    .attr("height", 80);
+
+EventConf();
+
+var drag = d3.behavior.drag()
+    .on("dragstart", function() {
+        if (d3.event.sourceEvent.which == 1) {
+            dragInitiated = true;
+        }
+
+    })
+    .on("drag", function() {
+
+        d3.select("#chandle")
+            .transition()
+            .duration(700)
+            .attr("r", 11)
+            .attr("opacity", 0.5);
+
+    })
+    .on("dragend", function() {
+        d3.select("#chandle")
+            .transition()
+            .duration(200)
+            .attr("r", 4)
+            .attr("opacity", 1);
+    });
+
+var handle = slider
+    .append("circle")
+    .attr("class", "handle")
+    .attr("id", "chandle")
+    .attr("r", 4)
+    .attr("transform", "translate(0,0)")
+    .on("mouseover", function() {
+        d3.select("#chandle")
+            .transition()
+            .duration(200)
+            .attr("r", 11)
+            .attr("opacity", 0.5);
+    })
+    .on("mouseout", function() {
+        d3.select("#chandle")
+            .transition()
+            .duration(100)
+            .attr("r", 4)
+            .attr("opacity", 1);
+    })
+    .call(drag);
+
+slider.append("g")
+    .attr("class", "l handle")
+    .append("path")
+    .attr("id", "lhandle")
+    .on("mouseover", function() {
+        d3.select("#chandle")
+            .transition()
+            .duration(200)
+            .attr("r", 11)
+            .attr("opacity", 0.5);
+    })
+    .on("mouseout", function() {
+        d3.select("#chandle")
+            .transition()
+            .duration(100)
+            .attr("r", 6)
+            .attr("opacity", 1);
+    })
+    .call(drag);
+
+slider.transition() // gratuitous intro!
+    .duration(700)
+    .call(brush.extent([1, 1]))
+    .call(brush.event);
+
+function brushed() {
+    var getUserTime = brush.extent()[0];　　　　　　　
+    var fmt = d3.time.format("%b %d %H:%M:%S %p");
+
+    if (d3.event.sourceEvent) { //移動事件
+        getUserTime = x.invert(d3.mouse(this)[0]); //date　String
+        brush.extent([getUserTime, getUserTime]);
+        selectTime = +(getUserTime);
+        selectTimex = x(selectTime);
+        console.log(selectTimex); //時間座標
+        console.log(selectTime); //時間   
+    }
+    updateCL(selectTime);
+    d3.select('.date')
+        .text(d3.time.format("%b %d")(new Date(selectTime)));
+    d3.select('.time')
+        .text(d3.time.format("%H:%M:%S %p")(new Date(selectTime)));
+
+}
+
+var updateX = function(e) {
+    xAxis.scale(e);
+    xAxisBar.scale(e);
+    svg.select('.x.axis')
+        .transition()
+        .duration(1000)
+        .call(xAxis);
+    svg.select('.x.grid')
+        .transition()
+        .duration(1000)
+        .call(xAxisBar);
+    svg.selectAll('.event.rect')
+        .transition()
+        .duration(1000)
+        .attr("x", function(d) {
+            return e(d);
+        });
+}
+
+//Pre-Next Button
+svg.append("polyline")
+    .attr("class", "shape button")
+    .attr("id", "lshape")
+    .attr("points", "15,-50, 5,-40, 15,-30")
+    .style({
+        fill: 'none',
+        stroke: '#ADADAD',
+        'stroke-width': 2,
+        'stroke-linecap': 'round',
+        opacity: 0.9
+    });
+
+svg.append("polyline")
+    .attr("class", "shape button")
+    .attr("id", "rshape")
+    .attr("points", "885,-50, 895,-40, 885,-30")
+    .style({
+        fill: 'none',
+        stroke: '#ADADAD',
+        'stroke-width': 2,
+        'stroke-linecap': 'round',
+        opacity: 0.9
+    });
+
+
+
+var btnL = svg.append("rect")
+    .attr("class", "lbt button")
+    .attr({
+        'x': 0,
+        'y': 0 - margin.top,
+        'rx': 3,
+        'ry': 3,
+        'width': 20,
+        'height': 60,
+        'fill': '#ffffff',
+        'opacity': 0,
+        'cursor': 'pointer'
+    })
+    .on("click", function() {
+
+        zoom.translate([transx + width, transy]);
+        updateX(x);
+        //更新座標
+        transx = transx + width;
+
+        switch (view) {
+            case 1:
+                minnext = (minnext - (Minstep * 6));
+                minpre = (minpre - (Minstep * 6));
+                break;
+            case 2:
+                minnext = (minnext - (Hourstep * 6));
+                minpre = (minpre - (Hourstep * 6));
+                break;
+            case 3:
+                minnext = (minnext - (Daystep * 6));
+                minpre = (minpre - (Daystep * 6));
+                break;
+        }
+
+        updateCL(selectTime);
+        d3.select('.date')
+            .text(d3.time.format("%b %d")(new Date(selectTime)));
+        d3.select('.time')
+            .text(d3.time.format("%H:%M:%S %p")(new Date(selectTime)));
+    })
+
+.on("mouseover", function() {
+        d3.select("#lshape")
+            .transition()
+            .duration(200)
+            .style("stroke", "#00A8F0")
+            .style("opacity", 0.9);
+
+    })
+    .on("mouseout", function() {
+        d3.select(this)
+            .attr("fill", "#FFFFFF")
+            .attr("opacity", 0);
+        d3.select("#lshape")
+            .transition()
+            .duration(400)
+            .style("stroke", "#ADADAD")
+            .style("opacity", 0.9);
+    });
+
+var btnR = svg.append("rect")
+    .attr("class", "rbt button")
+    .attr({
+        'x': width - 20,
+        'y': 0 - margin.top,
+        'rx': 3,
+        'ry': 3,
+        'width': 20,
+        'height': 60,
+        'fill': '#FFFFFF',
+        'opacity': 0,
+        'cursor': 'pointer'
+    })
+    .on("click", function() {
+        zoom.translate([transx - 900, transy]);
+        updateX(x);
+        //更新座標
+        transx = transx - width;
+        switch (view) {
+            case 1:
+                minnext = (minnext + (Minstep * 6));
+                minpre = (minpre + (Minstep * 6));
+                break;
+            case 2:
+                minnext = (minnext + (Hourstep * 6));
+                minpre = (minpre + (Hourstep * 6));
+                break;
+            case 3:
+                minnext = (minnext + (Daystep * 6));
+                minpre = (minpre + (Daystep * 6));
+                break;
+        }
+        if (st > minnext) { //當前為非live頁面
+            d3.selectAll(".rbt.button").attr("visibility", "");
+            d3.selectAll("#rshape").attr("visibility", "");
+            if (selectTime > minpre && selectTime < minnext) {}
+        } else {
+            d3.selectAll(".rbt.button").attr("visibility", "hidden");
+            d3.selectAll("#rshape").attr("visibility", "hidden");
+            if (selectTime > minpre && selectTime < minnext) {}
+        }
+
+        updateCL(selectTime);
+        d3.select('.date')
+            .text(d3.time.format("%b %d")(new Date(selectTime)));
+        d3.select('.time')
+            .text(d3.time.format("%H:%M:%S %p")(new Date(selectTime)));
+    })
+    .on("mouseover", function() {
+        d3.select("#rshape")
+            .transition()
+            .duration(200)
+            .style("stroke", "#00A8F0")
+            .style("opacity", 0.9);
+
+    })
+    .on("mouseout", function() {
+        d3.select(this)
+            .attr("fill", "#FFFFF")
+            .attr("opacity", 0);
+        d3.select("#rshape")
+            .transition()
+            .duration(400)
+            .style("stroke", "#ADADAD")
+            .style("opacity", 0.9);
+    });
+
+function hide() {
+    svg.append('rect').attr({
+        width: 30,
+        height: 125,
+        x: -30,
+        y: -110
+    }).style({
+        fill: '#FFFFFF'
+    });
+    svg.append('rect').attr({
+        width: 30,
+        height: 125,
+        x: width + 1,
+        y: -110
+    }).style({
+        fill: '#FFFFFF'
+    });
+}
+
+function zoomed() {
+    svg.select('.x.axis')
+        .call(xAxis)
+        .style("text-anchor", "middle");
+    svg.select('.x.grid')
+        .call(xAxisBar);
+    svg.selectAll('.event.rect').data(dataset)
+        .attr("x", function(d) {
+            return x(d);
+        });
+
+}
+var getNow = {
+    createNew: function() {
+        var getLive = {};
+        switch (view) {
+            case 1:
+                getLive.nowfmt = (Math.round(Date.now() / Minstep)) * Minstep;
+                getLive.livex = (getLive.nowfmt - minpree) / ((6 * Minstep) / 900);
+                break;
+            case 2:
+                getLive.nowfmt = (Math.round(Date.now() / Hourstep)) * Hourstep;
+                getLive.livex = (getLive.nowfmt - minpree) / ((6 * Hourstep) / 900);
+                break;
+            case 3:
+                getLive.nowfmt = (Math.round(Date.now() / Daystep)) * Daystep;
+                getLive.livex = (getLive.nowfmt - minpree) / ((6 * Daystep) / 900);
+                break;
+        }
+
+
+
+        return getLive;
+    }
+};
+
+function golive() {
+    clearInterval(playtimer);
+    clearInterval(livetimer);
+    d3.selectAll(".rbt.button").attr("visibility", "hidden");
+    d3.selectAll("#rshape").attr("visibility", "hidden");
+    var getLive = getNow.createNew();
+    //時間軸LIVE 
+    transx = 450;
+    zoom.translate([transx - getLive.livex, transy]);
+    updateX(x);
+    transx = transx - getLive.livex;
+    HiddenBtn("live", "d");
+    HiddenBtn("playback", "h");
+
+    switch (view) {
+        case 1:
+            before = Date.now() - (Minstep * 4.5);
+            after = Date.now() + (Minstep * 1.5);
+            minpre = ((Math.floor(before / Minstep)) * Minstep) + 120000;
+            minnext = ((Math.floor(after / Minstep)) * Minstep) + 120000;
+            break;
+        case 2:
+            before = Date.now() - (Hourstep * 4.5);
+            after = Date.now() + (Hourstep * 1.5);
+            minpre = ((Math.floor(before / Hourstep)) * Hourstep);
+            minnext = ((Math.floor(after / Hourstep)) * Hourstep);
+            break;
+        case 3:
+            before = Date.now() - (Daystep * 3);
+            after = Date.now() + (Daystep * 3);
+            minpre = ((Math.floor(before / Daystep)) * Daystep);
+            minnext = ((Math.floor(after / Daystep)) * Daystep);
+            break;
+    }
+
+    selectTime = Date.now();
+    st = Date.now();
+    console.log("Turn to Live mode.")
+    livetimer = setInterval(function() {
+        live()
+    }, 1000);
+}
+
+function live() {
+    d3.selectAll(".rbt.button").attr("visibility", "hidden");
+    d3.selectAll("#rshape").attr("visibility", "hidden");
+    HiddenBtn("live", "d");
+    HiddenBtn("playback", "h");
+    stx = x(st);
+    selectTimex = x(selectTime);
+    if (stx >= 900) { //當前為非live頁面
+        d3.selectAll(".rbt.button").attr("visibility", "");
+        d3.selectAll("#rshape").attr("visibility", "");
+    } else {
+        d3.selectAll(".rbt.button").attr("visibility", "hidden");
+        d3.selectAll("#rshape").attr("visibility", "hidden");
+    }
+    updateCL(selectTime);
+    svg.selectAll('#timebar')
+        .attr("d", 'M 0 -5.4' + 'L ' + x(st) + ' -5.4')
+        .attr("stroke", "#81D5EE")
+        .attr('stroke-width', 9)
+        .attr('opacity', 0.6);
+    d3.select('.date')
+        .text(d3.time.format("%b %d")(new Date(selectTime)));
+    d3.select('.time')
+        .text(d3.time.format("%H:%M:%S %p")(new Date(selectTime)));
+    st += 1000;
+    selectTime += 1000;
+
+    //播放時間大於時間軸&&允許翻頁
+    if (selectTimex == 901) {
+        freshliveR();
+    } //播放時間小於左界線
+
+    if (selectTime <= st) { //選擇時間小於live時間，切換為playback
+        clearInterval(livetimer);
+        console.log("Turn to Playback mode.")
+        playtimer = setInterval(function() {
+            playback()
+        }, 1000);
+    }
+}
+
+function MinRange() {
+    view = 1;
+    ChoseDisplay("min");
+    updateX(x);
+}
+
+function HourRange() {
+    view = 2;
+    ChoseDisplay("hour");
+    updateX(x);
+}
+
+function DayRange() {
+    view = 3;
+    ChoseDisplay("day");
+    updateX(x);
+}
+
+function playback() {
+    st = Date.now();
+    stx = x(st);
+    if (stx >= 900) { //當前為非live頁面
+        d3.selectAll(".rbt.button").attr("visibility", "");
+        d3.selectAll("#rshape").attr("visibility", "");
+    } else {
+        d3.selectAll(".rbt.button").attr("visibility", "hidden");
+        d3.selectAll("#rshape").attr("visibility", "hidden");
+    }
+
+    HiddenBtn("live", "h");
+    HiddenBtn("playback", "d");
+    svg.selectAll('#timebar')
+        .attr("d", 'M 0 -5.4' + 'L ' + x(st) + ' -5.4')
+        .attr("stroke", "#81D5EE")
+        .attr('stroke-width', 9)
+        .attr('opacity', 0.6);
+    updateCL(selectTime);
+    d3.select('.date')
+        .text(d3.time.format("%b %d")(new Date(selectTime)));
+    d3.select('.time')
+        .text(d3.time.format("%H:%M:%S %p")(new Date(selectTime)));
+    st += 1000;
+    selectTime += 1000;
+    selectTimex = x(selectTime - 1000);
+    if (selectTimex >= 900 && selectTimex <= 902) {
+        freshliveR();
+    } //播放時間小於左界線
+
+}
+
+hide();
+</script>
+
+
+
+</html>
